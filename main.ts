@@ -1,6 +1,8 @@
-import { Plugin, Notice, MarkdownRenderer, Component, Platform, requestUrl } from 'obsidian';
+import { Plugin, Notice, MarkdownRenderer, Component, Platform, requestUrl, Modal, App } from 'obsidian';
 // @ts-ignore
-import html2pdf from 'html2pdf.js';
+// import html2pdf from 'html2pdf.js'; // REMOVED: Using Native Print
+
+declare const DEBUG: boolean;
 
 export default class AndroidPdfPlugin extends Plugin {
     
@@ -25,67 +27,138 @@ export default class AndroidPdfPlugin extends Plugin {
             return;
         }
 
-        new Notice(`Generating PDF for ${activeFile.basename}...`);
+        if (typeof DEBUG !== 'undefined' && DEBUG) console.log(`[AndroidPdf] Starting export for ${activeFile.path}`);
+        new Notice(`Generating HTML for printing...`);
 
-        // --- 1. PREPARE CONTAINER ---
-        // We create a container that mimics a piece of paper (A4 width approx 794px at 96dpi)
-        // This ensures the PDF looks like a document, not a thin phone screenshot.
-        const container = document.body.createDiv('print-container');
-        container.style.position = 'absolute';
-        container.style.left = '-9999px'; // Hide off-screen
-        container.style.top = '0';
-        container.style.width = '794px'; // A4 width
-        container.style.minHeight = '1123px'; // A4 height
-        container.style.backgroundColor = 'white';
-        container.style.color = 'black';
-        container.style.padding = '40px'; 
-        container.style.fontSize = '14px';
+        // --- 1. PREPARE TEMP CONTAINER ---
+        const tempContainer = document.body.createDiv('print-temp-container');
+        tempContainer.style.display = 'none';
         
         try {
-            // --- 2. RENDER MARKDOWN ---
-            const content = await this.app.vault.read(activeFile);
-            await MarkdownRenderer.render(
-                this.app,
-                content,
-                container,
-                activeFile.path,
-                new Component()
-            );
+            // --- STEP 2: RENDER MARKDOWN ---
+            try {
+                if (typeof DEBUG !== 'undefined' && DEBUG) console.log('[AndroidPdf] Rendering markdown...');
+                const content = await this.app.vault.read(activeFile);
+                await MarkdownRenderer.render(
+                    this.app,
+                    content,
+                    tempContainer,
+                    activeFile.path,
+                    new Component()
+                );
+            } catch (err) {
+                console.error('[AndroidPdf] Markdown rendering failed', err);
+                new Notice('Failed to render Markdown content.');
+                throw err;
+            }
 
-            // --- 3. FIX IMAGES (CORS BYPASS) ---
-            // We fetch external images using Obsidian's requestUrl (which bypasses CORS)
-            // and convert them to Base64 data URIs.
-            await this.processImages(container);
+            // --- STEP 3: PROCESS IMAGES ---
+            try {
+                if (typeof DEBUG !== 'undefined' && DEBUG) console.log('[AndroidPdf] Processing images...');
+                await this.processImages(tempContainer);
+                this.sanitizeElements(tempContainer);
+            } catch (err) {
+                console.error('[AndroidPdf] Image processing failed', err);
+                new Notice('Failed to process images.');
+                throw err; 
+            }
 
-            // --- 4. SANITIZE (Remove videos/embeds) ---
-            this.sanitizeElements(container);
+            // --- STEP 4: CREATE HTML ---
+            let fullHtml = '';
+            try {
+                const css = `
+                <style>
+                    body { 
+                        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+                        color: #000;
+                        background: #fff;
+                        padding: 20px;
+                        line-height: 1.6;
+                        font-size: 14px;
+                        max-width: 800px;
+                        margin: 0 auto;
+                    }
+                    img { max-width: 100%; height: auto; display: block; margin: 10px 0; }
+                    h1, h2, h3, h4, h5, h6 { margin-top: 1.5em; margin-bottom: 0.5em; page-break-after: avoid; }
+                    blockquote { border-left: 4px solid #ccc; padding-left: 10px; color: #666; }
+                    code { background: #f4f4f4; padding: 2px 5px; border-radius: 3px; font-family: monospace; }
+                    pre { background: #f4f4f4; padding: 10px; border-radius: 5px; overflow-x: auto; }
+                    table { border-collapse: collapse; width: 100%; margin: 15px 0; }
+                    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                    th { background-color: #f2f2f2; }
+                    a { color: #007bff; text-decoration: none; }
+                    /* Print-specific overrides */
+                    @media print {
+                        body { padding: 0; margin: 0; }
+                        a { text-decoration: none; color: black; }
+                    }
+                </style>
+                `;
 
-            // --- 5. GENERATE PDF ---
-            const opt = {
-                margin: 10,
-                filename: `${activeFile.basename}.pdf`,
-                image: { type: 'jpeg', quality: 0.98 },
-                html2canvas: { 
-                    scale: 2, 
-                    useCORS: true, 
-                    scrollY: 0,
-                    windowWidth: 794 // Force canvas to match our container
-                },
-                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-            };
+                fullHtml = `
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <title>${activeFile.basename}</title>
+                        <meta charset="utf-8">
+                        <meta name="viewport" content="width=device-width, initial-scale=1">
+                        ${css}
+                    </head>
+                    <body>
+                        ${tempContainer.innerHTML}
+                        <script>
+                            // Auto-trigger print when opened
+                            window.onload = function() {
+                                setTimeout(function() {
+                                    window.print();
+                                }, 500);
+                            }
+                        </script>
+                    </body>
+                    </html>
+                `;
+            } catch (err) {
+                console.error('[AndroidPdf] HTML generation failed', err);
+                new Notice('Failed to generate HTML structure.');
+                throw err;
+            }
 
-            const pdfBlob = await html2pdf().set(opt).from(container).output('blob');
-            
-            // --- 6. SAVE TO VAULT ---
-            await this.saveBlobToVault(pdfBlob, `${activeFile.basename}.pdf`);
-            new Notice(`Saved: ${activeFile.basename}.pdf`);
+            // --- STEP 5: SAVE AND PROMPT ---
+            try {
+                if (typeof DEBUG !== 'undefined' && DEBUG) console.log('[AndroidPdf] Saving to vault...');
+                const encoder = new TextEncoder();
+                const arrayBuffer = encoder.encode(fullHtml);
+                
+                const savedPath = await this.saveFileToVault(arrayBuffer, `${activeFile.basename}.html`);
+                
+                if (typeof DEBUG !== 'undefined' && DEBUG) console.log(`[AndroidPdf] Saved to ${savedPath}`);
+                
+                new Notice(`Exported: ${savedPath}`);
+                new OpenPdfModal(this.app, savedPath).open();
+
+            } catch (err) {
+                console.error('[AndroidPdf] Saving failed', err);
+                new Notice('Failed to save the HTML file.');
+                throw err;
+            }
 
         } catch (e) {
-            console.error(e);
-            new Notice('PDF Export failed. Check console.');
+            // Main catch for any unexpected flow interruptions
+            if (typeof DEBUG !== 'undefined' && DEBUG) console.error('[AndroidPdf] General aborted', e);
         } finally {
-            document.body.removeChild(container);
+            document.body.removeChild(tempContainer);
         }
+    }
+
+    async saveFileToVault(buffer: ArrayBuffer, filename: string): Promise<string> {
+        let safeName = filename;
+        let i = 1;
+        while (await this.app.vault.adapter.exists(safeName)) {
+            safeName = filename.replace('.html', ` (${i}).html`);
+            i++;
+        }
+        await this.app.vault.createBinary(safeName, buffer);
+        return safeName;
     }
 
     async processImages(container: HTMLElement) {
@@ -145,13 +218,45 @@ export default class AndroidPdfPlugin extends Plugin {
     }
 
     async saveBlobToVault(blob: Blob, filename: string) {
+        // Legacy method, unused now but kept for reference
         const arrayBuffer = await blob.arrayBuffer();
-        let safeName = filename;
-        let i = 1;
-        while (await this.app.vault.adapter.exists(safeName)) {
-            safeName = filename.replace('.pdf', ` (${i}).pdf`);
-            i++;
-        }
-        await this.app.vault.createBinary(safeName, arrayBuffer);
+        await this.saveFileToVault(arrayBuffer, filename);
+    }
+
+    delay(ms: number) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+}
+
+class OpenPdfModal extends Modal {
+    filePath: string;
+
+    constructor(app: App, filePath: string) {
+        super(app);
+        this.filePath = filePath;
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.createEl('h2', { text: 'HTML Generated' });
+        contentEl.createEl('p', { text: 'The print-ready HTML file has been saved to your vault.' });
+        contentEl.createEl('p', { text: 'Would you like to open it in your default browser to print it as PDF?' });
+
+        const div = contentEl.createDiv({ cls: 'modal-button-container' });
+        
+        const btnOpen = div.createEl('button', { text: 'Open in Browser', cls: 'mod-cta' });
+        btnOpen.addEventListener('click', () => {
+            this.app.openWithDefaultApp(this.filePath);
+            this.close();
+        });
+
+        const btnCancel = div.createEl('button', { text: 'Cancel' });
+        btnCancel.addEventListener('click', () => {
+            this.close();
+        });
+    }
+
+    onClose() {
+        this.contentEl.empty();
     }
 }

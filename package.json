@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "node esbuild.config.mjs production",
+    "build:debug": "node esbuild.config.mjs debug",
     "push": "/home/dontloseyourheadsu/Android/Sdk/platform-tools/adb shell mkdir -p /sdcard/Documents/.obsidian/plugins/obsidian-android-pdf/ && /home/dontloseyourheadsu/Android/Sdk/platform-tools/adb push main.js manifest.json /sdcard/Documents/.obsidian/plugins/obsidian-android-pdf/"
   },
   "keywords": [],
