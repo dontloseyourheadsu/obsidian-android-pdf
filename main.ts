@@ -54,7 +54,12 @@ export default class AndroidPdfPlugin extends Plugin {
         a { color: #007bff; text-decoration: none; }
         /* Print-specific overrides */
         @media print {
-            body { padding: 0; margin: 0; }
+            body { 
+                padding: 0; 
+                margin: 0; 
+                -webkit-print-color-adjust: exact; 
+                print-color-adjust: exact; 
+            }
             a { text-decoration: none; color: black; }
             .print-hidden { display: none; }
         }
