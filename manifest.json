@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "minAppVersion": "0.15.0",
   "description": "Exports notes to PDF on Android by rendering to HTML first.",
-  "author": "Your Name",
-  "authorUrl": "https://github.com/yourname",
+  "author": "dontloseyourheadsu",
+  "authorUrl": "https://github.com/dontloseyourheadsu",
   "isDesktopOnly": false
 }
