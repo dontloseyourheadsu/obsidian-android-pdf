@@ -4,6 +4,13 @@ import { Plugin, Notice, MarkdownRenderer, Component, Platform, requestUrl, Moda
 
 declare const DEBUG: boolean;
 
+// Extending App interface to include openWithDefaultApp for mobile
+declare module 'obsidian' {
+    interface App {
+        openWithDefaultApp(path: string): void;
+    }
+}
+
 export default class AndroidPdfPlugin extends Plugin {
     
     async onload() {
@@ -52,10 +59,14 @@ export default class AndroidPdfPlugin extends Plugin {
                 throw err;
             }
 
-            // --- STEP 3: PROCESS IMAGES ---
+            // --- STEP 3: PREPARE FOLDER ---
+            const exportFolder = await this.createUniqueExportFolder(activeFile.basename);
+            if (typeof DEBUG !== 'undefined' && DEBUG) console.log(`[AndroidPdf] Export folder created: ${exportFolder}`);
+
+            // --- STEP 4: PROCESS IMAGES ---
             try {
                 if (typeof DEBUG !== 'undefined' && DEBUG) console.log('[AndroidPdf] Processing images...');
-                await this.processImages(tempContainer);
+                await this.processImages(tempContainer, exportFolder);
                 this.sanitizeElements(tempContainer);
             } catch (err) {
                 console.error('[AndroidPdf] Image processing failed', err);
@@ -63,7 +74,7 @@ export default class AndroidPdfPlugin extends Plugin {
                 throw err; 
             }
 
-            // --- STEP 4: CREATE HTML ---
+            // --- STEP 5: CREATE HTML ---
             let fullHtml = '';
             try {
                 const css = `
@@ -123,18 +134,19 @@ export default class AndroidPdfPlugin extends Plugin {
                 throw err;
             }
 
-            // --- STEP 5: SAVE AND PROMPT ---
+            // --- STEP 6: SAVE AND PROMPT ---
             try {
                 if (typeof DEBUG !== 'undefined' && DEBUG) console.log('[AndroidPdf] Saving to vault...');
-                const encoder = new TextEncoder();
-                const arrayBuffer = encoder.encode(fullHtml);
+                // @ts-ignore
+                const fullHtmlBuffer = new TextEncoder().encode(fullHtml).buffer;
                 
-                const savedPath = await this.saveFileToVault(arrayBuffer, `${activeFile.basename}.html`);
+                const htmlPath = `${exportFolder}/index.html`;
+                await this.app.vault.createBinary(htmlPath, fullHtmlBuffer);
                 
-                if (typeof DEBUG !== 'undefined' && DEBUG) console.log(`[AndroidPdf] Saved to ${savedPath}`);
+                if (typeof DEBUG !== 'undefined' && DEBUG) console.log(`[AndroidPdf] Saved to ${htmlPath}`);
                 
-                new Notice(`Exported: ${savedPath}`);
-                new OpenPdfModal(this.app, savedPath).open();
+                new Notice(`Exported to: ${exportFolder}`);
+                new OpenPdfModal(this.app, htmlPath).open();
 
             } catch (err) {
                 console.error('[AndroidPdf] Saving failed', err);
@@ -150,6 +162,25 @@ export default class AndroidPdfPlugin extends Plugin {
         }
     }
 
+    async createUniqueExportFolder(basename: string): Promise<string> {
+        // Sanitize basename to ensure valid folder name
+        const safeBasename = basename.replace(/[^a-z0-9]/gi, '_');
+        let folderName = `${safeBasename}-Export`
+        
+        if (!(await this.app.vault.adapter.exists(folderName))) {
+            await this.app.vault.createFolder(folderName);
+            return folderName;
+        }
+
+        let i = 1;
+        while (await this.app.vault.adapter.exists(`${folderName}-${i}`)) {
+            i++;
+        }
+        const newFolderName = `${folderName}-${i}`;
+        await this.app.vault.createFolder(newFolderName);
+        return newFolderName;
+    }
+
     async saveFileToVault(buffer: ArrayBuffer, filename: string): Promise<string> {
         let safeName = filename;
         let i = 1;
@@ -161,34 +192,118 @@ export default class AndroidPdfPlugin extends Plugin {
         return safeName;
     }
 
-    async processImages(container: HTMLElement) {
+    async processImages(container: HTMLElement, exportFolder: string) {
+        // Phase 1: Handle Obsidian "internal-embed" spans
+        const embeds = Array.from(container.querySelectorAll('span.internal-embed'));
+        
+        for (const span of embeds) {
+            const src = span.getAttribute('src');
+            if (!src) continue;
+
+            const ext = src.split('.').pop()?.toLowerCase();
+            const imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'svg', 'webp', 'heic'];
+            
+            if (ext && imageExtensions.includes(ext)) {
+                const img = document.createElement('img');
+                img.setAttribute('src', src);
+                img.setAttribute('data-is-embed', 'true');
+                img.style.maxWidth = '100%';
+                span.replaceWith(img);
+            }
+        }
+
+        // Phase 2: Process all img tags -> Convert to Base64
         const images = Array.from(container.querySelectorAll('img'));
         
-        const promises = images.map(async (img) => {
-            const src = img.getAttribute('src');
+        const promises = images.map(async (img, index) => {
+            const originalSrc = img.getAttribute('src');
             
-            // Skip if it's already local (app://) or base64 (data:)
-            if (!src || src.startsWith('data:') || src.startsWith('app://')) return;
+            // Skip already embedded images
+            if (!originalSrc || originalSrc.startsWith('data:')) return;
 
-            // Check if it's an external http/https link
-            if (src.startsWith('http')) {
-                try {
-                    // Use Obsidian's requestUrl to bypass CORS
-                    const response = await requestUrl({ url: src });
-                    
-                    // Create buffer from response
-                    const buffer = response.arrayBuffer;
-                    
-                    // Convert buffer to base64
-                    const base64 = this.arrayBufferToBase64(buffer);
-                    const contentType = response.headers['content-type'] || 'image/jpeg';
-                    
-                    // Replace src with base64 data URI
-                    img.src = `data:${contentType};base64,${base64}`;
-                } catch (err) {
-                    console.error(`Failed to fetch image ${src}`, err);
-                    img.alt = `[Image Load Failed]`;
+            // Mark processing to avoid loops if needed, though map is safe
+            try {
+                if (typeof DEBUG !== 'undefined' && DEBUG) console.log(`[AndroidPdf] Processing img src: ${originalSrc}`);
+
+                const isEmbed = img.getAttribute('data-is-embed') === 'true';
+                let linktext = '';
+                
+                if (isEmbed) {
+                    linktext = originalSrc;
+                } else {
+                    const decodedSrc = decodeURIComponent(originalSrc);
+                    linktext = decodedSrc.split('?')[0];
+                    linktext = linktext.split('/').pop() || '';
                 }
+
+                let buffer: ArrayBuffer | null = null;
+                let mimeType = 'image/png'; // default
+
+                 // 1. Resolve Local File
+                 const activeFile = this.app.workspace.getActiveFile();
+                 let file = this.app.metadataCache.getFirstLinkpathDest(linktext, activeFile?.path || '');
+
+                 if (!file && linktext) {
+                     const found = this.app.vault.getFiles().find(f => f.name === linktext);
+                     file = found || null;
+                 }
+
+                if (file) {
+                    if (typeof DEBUG !== 'undefined' && DEBUG) console.log(`[AndroidPdf] Found local file: ${file.path}`);
+                    buffer = await this.app.vault.readBinary(file);
+                    
+                    // Determine Mime Type from Extension
+                    const ext = file.extension.toLowerCase();
+                    if (ext === 'png') mimeType = 'image/png';
+                    else if (ext === 'jpg' || ext === 'jpeg') mimeType = 'image/jpeg';
+                    else if (ext === 'webp') mimeType = 'image/webp';
+                    else if (ext === 'gif') mimeType = 'image/gif';
+                    else if (ext === 'svg') mimeType = 'image/svg+xml';
+                    
+                } else if (!isEmbed && originalSrc.startsWith('http')) {
+                    // 2. Network Request
+                    if (typeof DEBUG !== 'undefined' && DEBUG) console.log(`[AndroidPdf] Trying requestUrl: ${originalSrc}`);
+                    const response = await requestUrl({ url: originalSrc });
+                    buffer = response.arrayBuffer;
+                    mimeType = response.headers['content-type'] || 'image/png';
+                }
+
+                // 3. Convert to Base64 and Embed
+                if (buffer) {
+                    // Convert ArrayBuffer to Base64 string using FileReader (async) for better performance/handling
+                    const base64 = await new Promise<string>((resolve, reject) => {
+                        const blob = new Blob([buffer], { type: mimeType });
+                        const reader = new FileReader();
+                        reader.onloadend = () => {
+                            if (reader.result) {
+                                resolve(reader.result as string);
+                            } else {
+                                reject(new Error('Empty conversion result'));
+                            }
+                        };
+                        reader.onerror = reject;
+                        reader.readAsDataURL(blob);
+                    });
+
+                    // Set the src to the Data URI
+                    img.setAttribute('src', base64);
+                    
+                    // Clean up attributes
+                    img.removeAttribute('srcset');
+                    img.removeAttribute('data-src');
+                    img.removeAttribute('data-is-embed');
+                    img.removeAttribute('sizes'); // important to remove sizes so browser uses natural size or style
+                    
+                    if (typeof DEBUG !== 'undefined' && DEBUG) console.log(`[AndroidPdf] Embedded image ${index} (${mimeType})`);
+                } else {
+                     console.error(`[AndroidPdf] Could not resolve buffer for: ${originalSrc}`);
+                     img.alt = `[Image Missing]`;
+                     // Optional: Add a visual placeholder
+                     img.style.border = "1px solid red";
+                }
+
+            } catch (err) {
+                console.error(`[AndroidPdf] Failed to process image ${originalSrc}`, err);
             }
         });
 
@@ -196,6 +311,7 @@ export default class AndroidPdfPlugin extends Plugin {
     }
 
     arrayBufferToBase64(buffer: ArrayBuffer): string {
+        // Legacy, unused now
         let binary = '';
         const bytes = new Uint8Array(buffer);
         const len = bytes.byteLength;
