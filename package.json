@@ -1,0 +1,25 @@
+{
+  "name": "obsidian-android-pdf",
+  "version": "1.0.0",
+  "description": "",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production",
+    "push": "/home/dontloseyourheadsu/Android/Sdk/platform-tools/adb shell mkdir -p /sdcard/Documents/.obsidian/plugins/obsidian-android-pdf/ && /home/dontloseyourheadsu/Android/Sdk/platform-tools/adb push main.js manifest.json /sdcard/Documents/.obsidian/plugins/obsidian-android-pdf/"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "esbuild": "^0.27.2",
+    "esbuild-loader": "^4.4.2",
+    "html2pdf.js": "^0.14.0",
+    "obsidian": "^1.11.4",
+    "tslib": "^2.8.1",
+    "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "builtin-modules": "^5.0.0"
+  }
+}
