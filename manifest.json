@@ -1,10 +1,10 @@
 {
-  "id": "android-pdf-export",
-  "name": "Android PDF Export",
-  "version": "1.0.0",
+  "id": "android-pdf",
+  "name": "Android PDF",
+  "version": "1.0.1",
   "minAppVersion": "0.15.0",
-  "description": "Exports notes to PDF on Android by rendering to HTML first.",
-  "author": "dontloseyourheadsu",
+  "description": "Script to simplify conversion of a markdown file into PDF though browser helpers.",
+  "author": "Dontloseyourheadsu",
   "authorUrl": "https://github.com/dontloseyourheadsu",
   "isDesktopOnly": false
 }

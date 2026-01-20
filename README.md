@@ -35,6 +35,46 @@ Since Obsidian mobile does not possess a native PDF export engine, this plugin r
 5.  Your browser should open the file and automatically show the Print dialog.
 6.  Select **"Save as PDF"** as the printer.
 
+## Walkthrough (with Screenshots)
+
+Below is a step-by-step walkthrough of using the plugin on Android, with screenshots of each interaction.
+
+### 1) Open the note you want to export
+
+![The original note inside Obsidian](example_images/original-file.jpg)
+
+This is the note you’ll export. The plugin uses Obsidian’s renderer, so what you see here is what gets turned into a printable HTML page.
+
+### 2) Run the export command
+
+![Command palette showing the export command](example_images/command-palette-print-pdf.jpg)
+
+Open the Command Palette and run **Android PDF Export: Export current file to PDF** (or use the ribbon icon if you’ve enabled it).
+
+### 3) Obsidian confirms the export location
+
+![Plugin modal showing “PDF Export Ready” and the output path](example_images/prompt-to-browser.jpg)
+
+Once the HTML is generated and saved into your vault, Obsidian shows a confirmation modal with the output path. Tap **Open in Browser** to continue.
+
+### 4) Pick a browser to open the generated HTML
+
+![Android “Open with” / app chooser for the generated HTML](example_images/browser-selector.jpg)
+
+After tapping **Open in Browser**, Android may ask what app to use to open the generated HTML. Choose your preferred browser (Chrome, WebView-based browser, etc.).
+
+### 5) The browser opens the printable page and shows the print dialog
+
+![Android print dialog in the browser for the generated HTML](example_images/browser-pdf-printer.jpg)
+
+The plugin’s HTML is designed for printing. When opened, it triggers the browser’s print flow so you can save it as a PDF.
+
+### 6) Your PDF is saved in Android’s Files app
+
+![Android Files app showing the exported PDF in recents](example_images/pdf-stored-in-files.jpg)
+
+After choosing **Save as PDF**, Android stores the PDF like any other downloaded/generated document. You can find it in the Files app (often under Recents or your selected destination).
+
 ## Development & Contributing
 
 Contributions are welcome!
@@ -63,3 +103,14 @@ You can test this on the desktop version of Obsidian as well, though the styling
 ## License
 
 MIT License. See [LICENSE](LICENSE) file.
+
+## Credits
+
+- Obsidian API (plugin runtime): https://obsidian.md
+- Obsidian Sample Plugin (project structure inspiration): https://github.com/obsidianmd/obsidian-sample-plugin
+- esbuild (bundler): https://github.com/evanw/esbuild
+- TypeScript (language/compiler): https://www.typescriptlang.org
+- tslib (TypeScript runtime helpers): https://github.com/microsoft/tslib
+- builtin-modules (Node builtin module list used by the build): https://github.com/sindresorhus/builtin-modules
+- esbuild-loader (build tooling dependency): https://github.com/privatenumber/esbuild-loader
+- html2pdf.js (dependency): https://github.com/eKoopmans/html2pdf.js
